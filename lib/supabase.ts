@@ -12,77 +12,88 @@ export interface HookSessionData {
   failed_rules: string[];
 }
 
-export async function saveSessionAndDispatchWebhook(session: HookSessionData) {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+export async function saveSessionAndDispatchWebhook(
+  session: HookSessionData
+) {
+  const supabaseUrl =
+    process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+
+  const supabaseKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
   const makeWebhookUrl = process.env.MAKE_WEBHOOK_URL;
+  const makeWebhookApiKey = process.env.MAKE_WEBHOOK_API_KEY;
 
   let supabaseRecordId: string | null = null;
 
-  // 1. Persist to Supabase if configured
+  // 1. Save ONE complete Hook Grader session to hook_grader_sessions
   if (supabaseUrl && supabaseKey) {
     try {
       const supabase = createClient(supabaseUrl, supabaseKey);
+
       const { data, error } = await supabase
-        .from("leads")
+        .from("hook_grader_sessions")
         .insert({
-          source_tool: "linkedin_hook_grader",
-          first_name: session.first_name,
-          last_name: session.last_name,
+          name: `${session.first_name} ${session.last_name}`.trim(),
           designation: session.designation,
           email: session.email,
-          tool_input: session.hook,
-          tool_output: JSON.stringify({
-            score: session.score,
-            rewrites: session.rewrites,
-            failed_rules: session.failed_rules,
-          }),
-          created_at: new Date().toISOString(),
+          hook: session.hook,
+          score: session.score,
+          failed_rules: session.failed_rules,
+          rewrites: session.rewrites,
         })
-        .select("lead_id, id")
+        .select("id")
         .single();
 
       if (error) {
         console.error("Supabase session insert error:", error);
       } else {
-        supabaseRecordId = data?.id || data?.lead_id || null;
+        supabaseRecordId = data?.id || null;
       }
     } catch (err) {
       console.error("Supabase client connection exception:", err);
     }
   }
 
-  // 2. Dispatch to Make.com Webhook (Task 01 Follow-Up Automation Scenario)
+  // 2. Send the same session to the Task 02 Make webhook
   let webhookDispatched = false;
+
   if (makeWebhookUrl) {
     try {
       const webhookPayload = {
-        event: "new_tool_session",
-        source_tool: "linkedin_hook_grader",
-        session_id: supabaseRecordId || `local_${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        lead: {
-          first_name: session.first_name,
-          last_name: session.last_name,
-          full_name: `${session.first_name} ${session.last_name}`.trim(),
-          designation: session.designation,
-          email: session.email,
-        },
-        tool_data: {
-          hook_input: session.hook,
-          grader_score: session.score,
-          failed_feedback: session.failed_rules,
-          rewrites: session.rewrites,
-        },
+        name: `${session.first_name} ${session.last_name}`.trim(),
+        designation: session.designation,
+        email: session.email,
+        hook: session.hook,
+        score: session.score,
+        failed_rules: session.failed_rules,
+        rewrites: session.rewrites,
       };
+
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+
+      if (makeWebhookApiKey) {
+        headers["x-make-apikey"] = makeWebhookApiKey;
+      }
 
       const res = await fetch(makeWebhookUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify(webhookPayload),
       });
 
       webhookDispatched = res.ok;
+
+      if (!res.ok) {
+        console.error(
+          "Make webhook returned:",
+          res.status,
+          await res.text()
+        );
+      }
     } catch (whErr) {
       console.error("Make.com webhook dispatch failed:", whErr);
     }
