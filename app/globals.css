@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --brand-mint: #00DF81;
+    --brand-dark: #0B0F17;
+    --brand-card: #131A26;
+    --brand-border: #1E293B;
+  }
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: #0b0f17;
+  color: #f1f5f9;
+}
