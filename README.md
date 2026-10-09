@@ -1,73 +1,111 @@
-# Myntmore — Tool #10: LinkedIn Hook Grader
+# Myntmore Tool #10: LinkedIn Hook Grader
 
-The 10th free AI lead magnet for [Myntmore.com](https://myntmore.com/resources/tools). Built with Next.js (App Router), deployed on Vercel, integrated with Supabase, Make.com webhook automation, and Google Gemini 2.5 Flash.
+Paste the first two lines of a LinkedIn post. Get a score out of 100, a line explaining each rule you failed, and three rewrites. Every session is saved to Supabase and sent to the lead-follow-up scenario in Make.com.
 
----
+**Live app:** `PASTE YOUR PUBLIC VERCEL LINK HERE`
+**Stack:** Next.js 14 (App Router, TypeScript, Tailwind) on Vercel, Supabase, Make.com, Gemini 2.5 Flash
 
-## 🚀 Live Demo & Repository
-- **Framework**: Next.js 14 (App Router) + TypeScript + Tailwind CSS
-- **Live Deployment**: Ready to deploy on Vercel with 1-click
-- **Integrations**: 
-  - **Database**: Supabase (`leads` table)
-  - **Automation Engine**: Make.com / n8n Webhook (routes session to Task 01 scenario)
-  - **AI Model**: Google Gemini 2.5 Flash (`responseSchema` structured JSON)
+## How it works
 
----
+```
+Visitor  ->  form + hook  ->  POST /api/grade-hook
+                                 1. validate input
+                                 2. score with code (5 rules)      <- no AI, same hook = same score
+                                 3. Gemini writes 3 rewrites       <- structured JSON (responseSchema)
+                                 4. code checks the rewrites       <- dashes, jargon, invented numbers, length
+                                 5. save row in Supabase (hook_sessions)
+                                 6. POST to Make.com webhook       -> Task 01 scoring + follow-up
+                              <-  score, failed-rule lines, rewrites
+```
 
-## 🧠 Key Technical Features
+Steps 5 and 6 can fail without breaking the visitor's result. The failure is logged, and the row records `webhook_status`.
 
-### 1. Deterministic Code-Based Scoring (Not AI)
-The hook grader scores the user's input strictly using code logic across 5 deterministic rules (Total: 100 points). **The same hook will always receive the exact same score and failure line items:**
+## The score (code, not AI)
 
-1. **Character Count & Mobile Cutoff (20 pts)**: Must be 30–210 characters so it fits before LinkedIn's mobile "...see more" fold without truncation.
-2. **Line Count & Skimmability (20 pts)**: Strictly 1–2 lines. Dense blocks lacking punctuation fail.
-3. **Stop-Scroll Pattern (20 pts)**: Must feature a metric/number, a question, or a proven curiosity opener.
-4. **Zero Corporate Clichés (20 pts)**: Disqualifies self-serving buzzwords ("excited to announce", "game-changer", "synergy").
-5. **Curiosity Gap / Tension (20 pts)**: Enforces an unresolved loop or contrast forcing readers to expand the post.
+Five rules, 20 points each. The same hook always gets the same score.
 
-### 2. Structured AI Rewrites via Gemini 2.5 Flash
-Invokes Google Gemini with strict `responseSchema` constraints to return exactly 3 hooks:
-- **Contrarian / Unpopular Opinion**
-- **Data & Outcome-Driven**
-- **Story & Open Loop**
-*Writing constraints enforced*: No jargon, no em dashes, under 25 words per hook, no invented metrics.
+| # | Rule | Passes when |
+|---|---|---|
+| 1 | Length | 30 to 210 characters, so it fits before "see more" on mobile |
+| 2 | Skimmable | At most 2 lines, and not one dense block |
+| 3 | Stop-scroll trigger | Has a number, a question, or a curiosity word (whole-word match) |
+| 4 | No clichés | No "excited to announce", "game-changer", "synergy" and similar |
+| 5 | Open loop | Has a contrast or setup word ("but", "instead", "here is") or a colon/arrow |
 
-### 3. Lead Capture & Automation Dispatch
-Every session stores the contact details (`first_name`, `last_name`, `designation`, `email`), hook input, score, and rewrites into Supabase, and immediately fires an HTTP payload to the Make.com webhook for Task 01 scoring and routing.
+Each failed rule returns one plain-English line saying how to fix it.
 
----
+## The rewrites (Gemini 2.5 Flash)
 
-## 🛠️ Local Setup
+Three hooks: **Contrarian**, **Specific outcome**, **Story**. The response is forced into JSON with `responseSchema`. The writing rules from Task 01 are then **enforced in code**, not just requested in the prompt:
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/your-username/myntmore-linkedin-hook-grader.git
-   cd myntmore-linkedin-hook-grader
-   ```
+- no em dashes (auto-replaced)
+- at most 2 lines and 25 words
+- no number that is not in the visitor's original hook
+- no jargon from a banned list
 
-2. **Install dependencies:**
-   ```bash
-   npm install
-   ```
+A rewrite that breaks a rule triggers one retry. If Gemini is down, the app says so. It never shows made-up rewrites.
 
-3. **Configure Environment Variables:**
-   Create a `.env.local` file based on `.env.example`:
-   ```env
-   GEMINI_API_KEY=your_gemini_api_key
-   NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-   SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
-   MAKE_WEBHOOK_URL=https://hook.eu1.make.com/your_webhook_id
-   ```
+## Run locally
 
-4. **Run development server:**
-   ```bash
-   npm run dev
-   ```
-   Open [http://localhost:3000](http://localhost:3000) in your browser.
+```bash
+npm install
+cp .env.example .env.local     # fill in the values
+npm run dev                    # http://localhost:3000
+```
 
----
+## Set up Supabase
 
-## 📦 Vercel Deployment
-1. Import repository to [Vercel](https://vercel.com).
-2. Add the environment variables (`GEMINI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `MAKE_WEBHOOK_URL`).
-3. Deploy!
+Run `supabase/schema.sql` in the Supabase SQL editor. It creates the `hook_sessions` table (one row per session).
+
+## Set up the Make.com webhook
+
+1. In Make, add **Webhooks > Custom webhook** as the first module and copy its URL into `MAKE_WEBHOOK_URL`.
+2. Submit the form once so Make learns the data structure.
+
+Payload sent to Make:
+
+```json
+{
+  "session_id": "uuid from Supabase",
+  "source_tool": "linkedin_hook_grader",
+  "first_name": "Asha", "last_name": "Rao", "designation": "Founder", "email": "asha@company.com",
+  "tool_input": "<the hook>",
+  "tool_output": "Hook score 80/100. Rewrites: ... | ... | ...",
+  "hook": "<the hook>", "score": 80,
+  "failed_rules": ["..."],
+  "rewrites": [{ "angle": "...", "hook": "...", "why_it_works": "..." }]
+}
+```
+
+`first_name`, `last_name`, `designation`, `email`, `tool_input` and `tool_output` use the same names as the `leads` table, so the scenario can add the lead and score it like any other.
+
+## Deploy to Vercel
+
+1. Push this repo to GitHub, then **Import** it in Vercel.
+2. Add the environment variables from `.env.example`.
+3. Deploy, then open **Settings > Deployment Protection** and turn **Vercel Authentication off**. If you skip this, anyone who opens your link sees a Vercel login page instead of the app.
+4. Use the **production domain** (for example `your-app.vercel.app`) as the public link, not a per-deployment URL.
+
+## Test it
+
+- Hook `I lost 3 clients in one week.` / `Here is the mistake you can avoid.` should score 100.
+- Hook `Thrilled to share that our team launched a new product.` should score under 50 and list the failed rules.
+- Submit twice with the same hook: the score must match.
+- Check Supabase for the new row and Make for the incoming webhook run.
+
+## Known limits
+
+- The rate limit (5 requests a minute per IP) is per server instance, so it is a basic guard, not a hard cap.
+- The scoring rules are heuristics. They check structure, not whether the hook is actually good.
+- Gemini's free tier can rate-limit under load. The app then shows the score without rewrites.
+
+## Structure
+
+```
+app/page.tsx                 form, tool and results UI
+app/api/grade-hook/route.ts  validation, orchestration
+lib/grader.ts                the 5 scoring rules
+lib/gemini.ts                rewrites + writing-rule checks
+lib/supabase.ts              save session + Make webhook
+supabase/schema.sql          table definition
+```
