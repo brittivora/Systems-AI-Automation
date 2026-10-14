@@ -1,111 +1,85 @@
-# Myntmore Tool #10: LinkedIn Hook Grader
+# LinkedIn Hook Grader (Myntmore Tool #10)
 
-Paste the first two lines of a LinkedIn post. Get a score out of 100, a line explaining each rule you failed, and three rewrites. Every session is saved to Supabase and sent to the lead-follow-up scenario in Make.com.
+A visitor pastes the first two lines of a LinkedIn post and gets a score out of 100, one line for each rule the hook failed, and three rewrites. Each session is sent to Make.com, which saves it in Supabase.
 
-**Live app:** `PASTE YOUR PUBLIC VERCEL LINK HERE`
-**Stack:** Next.js 14 (App Router, TypeScript, Tailwind) on Vercel, Supabase, Make.com, Gemini 2.5 Flash
+- **Live app:** https://systems-ai-automation.vercel.app/
+- **Walkthrough (Loom):** https://www.loom.com/share/6bed8a985dbd41ab90e7eccb052c912f
+- **Stack:** Next.js 14 (App Router, TypeScript, Tailwind CSS), Gemini via `@google/generative-ai`, Make.com webhook, Supabase, Vercel
 
 ## How it works
 
 ```
-Visitor  ->  form + hook  ->  POST /api/grade-hook
-                                 1. validate input
-                                 2. score with code (5 rules)      <- no AI, same hook = same score
-                                 3. Gemini writes 3 rewrites       <- structured JSON (responseSchema)
-                                 4. code checks the rewrites       <- dashes, jargon, invented numbers, length
-                                 5. save row in Supabase (hook_sessions)
-                                 6. POST to Make.com webhook       -> Task 01 scoring + follow-up
-                              <-  score, failed-rule lines, rewrites
+Browser form  ->  POST /api/grade-hook
+                    1. check that hook, email and first name are present
+                    2. score the hook with code            (lib/grader.ts, no AI)
+                    3. ask Gemini for 3 rewrites as JSON   (lib/gemini.ts)
+                    4. POST the session to a Make webhook  (lib/supabase.ts)
+                 <- score, failed-rule lines, rewrites
+Make scenario: Webhook -> Supabase "Create a Row"
 ```
 
-Steps 5 and 6 can fail without breaking the visitor's result. The failure is logged, and the row records `webhook_status`.
+The screen is a single page (`app/page.tsx`) with the contact form, the hook box, and the results. The API route is `app/api/grade-hook/route.ts`.
 
 ## The score (code, not AI)
 
-Five rules, 20 points each. The same hook always gets the same score.
+Five rules worth 20 points each. The same hook always gets the same score, because the rules are plain if-statements.
 
-| # | Rule | Passes when |
-|---|---|---|
-| 1 | Length | 30 to 210 characters, so it fits before "see more" on mobile |
-| 2 | Skimmable | At most 2 lines, and not one dense block |
-| 3 | Stop-scroll trigger | Has a number, a question, or a curiosity word (whole-word match) |
-| 4 | No clichés | No "excited to announce", "game-changer", "synergy" and similar |
-| 5 | Open loop | Has a contrast or setup word ("but", "instead", "here is") or a colon/arrow |
+| Rule | Passes when |
+|---|---|
+| Length | 30 to 210 characters, so it fits before "see more" on mobile |
+| Structure | At most 2 lines, and not one long block with no punctuation |
+| Stop-scroll trigger | Has a number, a question mark, or a curiosity word such as "why", "never" or "mistake" |
+| No clichés | No phrases like "thrilled to share", "excited to announce" or "game-changer" |
+| Open loop | Has a tension word ("but", "instead", "here is", "without") or a colon or arrow |
 
-Each failed rule returns one plain-English line saying how to fix it.
+Each failed rule returns one sentence explaining how to fix it.
 
-## The rewrites (Gemini 2.5 Flash)
+## The rewrites (Gemini)
 
-Three hooks: **Contrarian**, **Specific outcome**, **Story**. The response is forced into JSON with `responseSchema`. The writing rules from Task 01 are then **enforced in code**, not just requested in the prompt:
+`lib/gemini.ts` sends the hook to Gemini and forces the reply into JSON with `responseSchema`. It returns three items, each with `angle`, `hook` and `why_it_works`. The three angles are contrarian, data-and-outcome, and story. The writing rules (no jargon, no em dashes, no outrageous claims, at most 2 lines and 25 words) are given to the model in the prompt.
 
-- no em dashes (auto-replaced)
-- at most 2 lines and 25 words
-- no number that is not in the visitor's original hook
-- no jargon from a banned list
-
-A rewrite that breaks a rule triggers one retry. If Gemini is down, the app says so. It never shows made-up rewrites.
-
-## Run locally
-
-```bash
-npm install
-cp .env.example .env.local     # fill in the values
-npm run dev                    # http://localhost:3000
-```
-
-## Set up Supabase
-
-Run `supabase/schema.sql` in the Supabase SQL editor. It creates the `hook_sessions` table (one row per session).
-
-## Set up the Make.com webhook
-
-1. In Make, add **Webhooks > Custom webhook** as the first module and copy its URL into `MAKE_WEBHOOK_URL`.
-2. Submit the form once so Make learns the data structure.
-
-Payload sent to Make:
+## Data sent to Make
 
 ```json
 {
-  "session_id": "uuid from Supabase",
-  "source_tool": "linkedin_hook_grader",
-  "first_name": "Asha", "last_name": "Rao", "designation": "Founder", "email": "asha@company.com",
-  "tool_input": "<the hook>",
-  "tool_output": "Hook score 80/100. Rewrites: ... | ... | ...",
-  "hook": "<the hook>", "score": 80,
+  "name": "Full Name",
+  "designation": "Founder",
+  "email": "name@company.com",
+  "hook": "the pasted hook",
+  "score": 80,
   "failed_rules": ["..."],
   "rewrites": [{ "angle": "...", "hook": "...", "why_it_works": "..." }]
 }
 ```
 
-`first_name`, `last_name`, `designation`, `email`, `tool_input` and `tool_output` use the same names as the `leads` table, so the scenario can add the lead and score it like any other.
+The Make scenario ("Task 02 LinkedIn Hook Grader to Supabase") has two modules: a custom webhook that receives this, and a Supabase "Create a Row" that saves it.
 
-## Deploy to Vercel
+## Run locally
 
-1. Push this repo to GitHub, then **Import** it in Vercel.
-2. Add the environment variables from `.env.example`.
-3. Deploy, then open **Settings > Deployment Protection** and turn **Vercel Authentication off**. If you skip this, anyone who opens your link sees a Vercel login page instead of the app.
-4. Use the **production domain** (for example `your-app.vercel.app`) as the public link, not a per-deployment URL.
-
-## Test it
-
-- Hook `I lost 3 clients in one week.` / `Here is the mistake you can avoid.` should score 100.
-- Hook `Thrilled to share that our team launched a new product.` should score under 50 and list the failed rules.
-- Submit twice with the same hook: the score must match.
-- Check Supabase for the new row and Make for the incoming webhook run.
-
-## Known limits
-
-- The rate limit (5 requests a minute per IP) is per server instance, so it is a basic guard, not a hard cap.
-- The scoring rules are heuristics. They check structure, not whether the hook is actually good.
-- Gemini's free tier can rate-limit under load. The app then shows the score without rewrites.
-
-## Structure
-
+```bash
+npm install
+cp .env.example .env.local     # then fill in the values
+npm run dev                    # http://localhost:3000
 ```
-app/page.tsx                 form, tool and results UI
-app/api/grade-hook/route.ts  validation, orchestration
-lib/grader.ts                the 5 scoring rules
-lib/gemini.ts                rewrites + writing-rule checks
-lib/supabase.ts              save session + Make webhook
-supabase/schema.sql          table definition
-```
+
+| Variable | Used for |
+|---|---|
+| `GEMINI_API_KEY` | Gemini rewrites (free key from Google AI Studio) |
+| `MAKE_WEBHOOK_URL` | The Make webhook that receives each session |
+| `MAKE_WEBHOOK_API_KEY` | Optional, only if the Make webhook has an API key |
+
+`.env.example` also lists the Supabase variables. The app itself does not use them, because Make does the saving.
+
+## Deploy
+
+Push to GitHub, import the repo in Vercel, add the variables above in Settings > Environment Variables, and deploy. Turn off Vercel's Deployment Protection so the link is public.
+
+## Known limitations and next steps
+
+- **Model name.** The code uses `gemini-2.5-flash`, as the brief specified. Google is retiring the 2.5 models, so if Gemini calls fail, change the model name in `lib/gemini.ts` to a current one.
+- **Fallback rewrites.** If the Gemini key is missing or the call fails, the app returns three fixed example hooks that contain example numbers and do not reflect the visitor's hook. The better behaviour is to show an error message instead.
+- **Rewrite rules are not checked in code.** The prompt asks Gemini to follow the writing rules, but nothing in the code verifies the output yet.
+- **Webhook failure.** If Make is off or returns an error, the API returns an error even though the score was calculated. Failures should be caught and logged, so the visitor still sees their result.
+- **Saving.** Sessions are saved by Make, not by the app. They land in their own table and do not go through the lead-scoring scenario yet. Saving them into the main leads table would connect the two.
+- **Rule matching.** Keyword rules match pieces of words (for example, "how" inside "show"), so whole-word matching would be more accurate.
+- **Input checks.** There is no email format check, no length limit, and no rate limit.
