@@ -74,12 +74,6 @@ npm run dev                    # http://localhost:3000
 
 Push to GitHub, import the repo in Vercel, add the variables above in Settings > Environment Variables, and deploy. Turn off Vercel's Deployment Protection so the link is public.
 
-## Known limitations and next steps
 
-- **Model name.** The code uses `gemini-2.5-flash`, as the brief specified. Google is retiring the 2.5 models, so if Gemini calls fail, change the model name in `lib/gemini.ts` to a current one.
-- **Fallback rewrites.** If the Gemini key is missing or the call fails, the app returns three fixed example hooks that contain example numbers and do not reflect the visitor's hook. The better behaviour is to show an error message instead.
-- **Rewrite rules are not checked in code.** The prompt asks Gemini to follow the writing rules, but nothing in the code verifies the output yet.
-- **Webhook failure.** If Make is off or returns an error, the API returns an error even though the score was calculated. Failures should be caught and logged, so the visitor still sees their result.
-- **Saving.** Sessions are saved by Make, not by the app. They land in their own table and do not go through the lead-scoring scenario yet. Saving them into the main leads table would connect the two.
 - **Rule matching.** Keyword rules match pieces of words (for example, "how" inside "show"), so whole-word matching would be more accurate.
 - **Input checks.** There is no email format check, no length limit, and no rate limit.
